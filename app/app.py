@@ -100,7 +100,33 @@ df = add_features(df)
 st.subheader("Dataset Overview")
 st.write(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
 st.dataframe(df.head(10))
+# Filters in sidebar
+st.sidebar.header("Filters")
+states = df['state_name'].unique()
+sectors = df['industrial_sector'].unique()
 
+selected_states = st.sidebar.multiselect("Select States", states, default=states)
+selected_sectors = st.sidebar.multiselect("Select Sectors", sectors, default=sectors)
+
+# Apply filters
+df_filtered = df[(df['state_name'].isin(selected_states)) & (df['industrial_sector'].isin(selected_sectors))]
+
+# Tabs for visualizations
+tab1, tab2, tab3, tab4 = st.tabs(["Bar Polar", "Sunburst", "Rural vs Urban", "Geospatial Map"])
+
+with tab1:
+    st.plotly_chart(bar_polar_sector(df_filtered), use_container_width=True)
+
+with tab2:
+    st.plotly_chart(sunburst_state_district_sector(df_filtered), use_container_width=True)
+
+with tab3:
+    st.plotly_chart(stacked_rural_urban(df_filtered), use_container_width=True)
+
+with tab4:
+    geo_fig = geospatial_map(df_filtered)
+    if geo_fig:
+        st.plotly_chart(geo_fig, use_container_width=True)
 # Show key visualizations
 st.subheader("Sector-wise Workforce Distribution (Bar Polar)")
 st.plotly_chart(bar_polar_sector(df), use_container_width=True)
