@@ -2,155 +2,136 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
-# -------------------------------
-# Data Loading Function
-# -------------------------------
+# ------------------------------
+# Constants
+# ------------------------------
+DATA_PATH = "final_cleaned_industrial_data.csv"
+
+# ------------------------------
+# Load Data
+# ------------------------------
 @st.cache_data
 def load_data(file_path):
-    """
-    Load cleaned industrial workforce dataset
-    """
-    try:
-        df = pd.read_csv(file_path)
-        return df
-    except FileNotFoundError:
-        st.error(f"File not found: {file_path}. Please check the file location!")
-        return pd.DataFrame()
-
-# -------------------------------
-# Feature Engineering Functions
-# -------------------------------
-def add_features(df):
-    """
-    Adds new features for insights:
-    - Rural/Urban workforce ratio
-    - Total workforce
-    """
-    df['total_workforce'] = df['main_workers_-_total_-_persons'] + df['marginal_workers_-_total_-_persons']
-    df['rural_urban_ratio'] = (df['main_workers_-_rural_-_persons'] + df['marginal_workers_-_rural_-_persons']) / \
-                              (df['main_workers_-_urban_-_persons'] + df['marginal_workers_-_urban_-_persons'] + 1e-6)
+    df = pd.read_csv(file_path)
+    # Create Rural/Urban ratio
+    df["rural_ratio"] = df["main_workers_-_rural_-_persons"] / df["main_workers_-_total_-_persons"]
+    df["urban_ratio"] = df["main_workers_-_urban_-_persons"] / df["main_workers_-_total_-_persons"]
     return df
 
-# -------------------------------
-# Visualization Functions
-# -------------------------------
-def bar_polar_sector(df):
-    """
-    Polar bar chart: Workforce distribution by Industrial Sector
-    """
-    df_sector = df.groupby('industrial_sector')['total_workforce'].sum().reset_index()
-    fig = px.bar_polar(df_sector, r='total_workforce', theta='industrial_sector',
-                       color='industrial_sector', template='plotly_dark',
+# ------------------------------
+# Filter Data
+# ------------------------------
+def filter_data(df, states_selected, sectors_selected):
+    if states_selected:
+        df = df[df["state_name"].isin(states_selected)]
+    if sectors_selected:
+        df = df[df["industrial_sector"].isin(sectors_selected)]
+    return df
+
+# ------------------------------
+# Sector Workforce - Bar Polar
+# ------------------------------
+def plot_bar_polar(df):
+    sector_sum = df.groupby("industrial_sector")["main_workers_-_total_-_persons"].sum().reset_index()
+    fig = px.bar_polar(sector_sum, r="main_workers_-_total_-_persons",
+                       theta="industrial_sector", color="industrial_sector",
+                       template="plotly_dark",
                        title="Sector-wise Workforce Distribution")
-    return fig
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("**Insight:** This chart shows which sectors have the highest workforce concentration.")
 
-def sunburst_state_district_sector(df):
-    """
-    Sunburst: State → District → Industrial Sector
-    """
-    df_sun = df.groupby(['state_name', 'district_name', 'industrial_sector'])['total_workforce'].sum().reset_index()
-    fig = px.sunburst(df_sun, path=['state_name', 'district_name', 'industrial_sector'], values='total_workforce',
-                      color='total_workforce', color_continuous_scale='Viridis',
-                      title="Workforce Hierarchy: State → District → Sector")
-    return fig
+# ------------------------------
+# Sunburst Chart: State → District → Sector
+# ------------------------------
+def plot_sunburst(df):
+    fig = px.sunburst(df, path=["state_name", "district_name", "industrial_sector"],
+                      values="main_workers_-_total_-_persons",
+                      color="industrial_sector",
+                      title="Workforce Distribution by State → District → Sector")
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("**Insight:** Hierarchy of workforce by location and industry sector.")
 
-def geospatial_map(df):
-    """
-    Map: Workforce size by district
-    NOTE: Requires 'latitude' and 'longitude' columns. Replace below with geocoding if needed.
-    """
-    if 'latitude' not in df.columns or 'longitude' not in df.columns:
-        st.warning("Geospatial map not available: 'latitude'/'longitude' missing in dataset.")
-        return None
+# ------------------------------
+# Stacked Bar: Rural vs Urban
+# ------------------------------
+def plot_stacked_rural_urban(df):
+    stacked_df = df.groupby("industrial_sector")[["main_workers_-_rural_-_persons",
+                                                 "main_workers_-_urban_-_persons"]].sum().reset_index()
+    fig = px.bar(stacked_df, x="industrial_sector",
+                 y=["main_workers_-_rural_-_persons", "main_workers_-_urban_-_persons"],
+                 title="Rural vs Urban Workforce by Sector",
+                 labels={"value":"Number of Workers", "industrial_sector":"Sector"},
+                 text_auto=True)
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("**Insight:** Compare rural and urban workforce per sector to identify gaps.")
+
+# ------------------------------
+# Geospatial Map (District Workforce)
+# ------------------------------
+def plot_geospatial(df):
+    # Ensure lat/lon columns exist; for demonstration, we use dummy lat/lon
+    if "lat" not in df.columns or "lon" not in df.columns:
+        st.warning("No lat/lon data found. Using dummy coordinates for demonstration.")
+        df["lat"] = np.random.uniform(8, 37, df.shape[0])
+        df["lon"] = np.random.uniform(68, 97, df.shape[0])
     
-    df_map = df.groupby(['district_name', 'state_name', 'latitude', 'longitude'])['total_workforce'].sum().reset_index()
-    fig = px.scatter_mapbox(df_map, lat='latitude', lon='longitude', size='total_workforce',
-                            hover_name='district_name', hover_data=['state_name', 'total_workforce'],
-                            color='total_workforce', color_continuous_scale='Turbo', zoom=4, height=600)
-    fig.update_layout(mapbox_style="open-street-map", title="District-wise Workforce Size")
-    return fig
+    district_sum = df.groupby(["district_name", "lat", "lon"])["main_workers_-_total_-_persons"].sum().reset_index()
+    fig = px.scatter_mapbox(district_sum, lat="lat", lon="lon", size="main_workers_-_total_-_persons",
+                            hover_name="district_name",
+                            color="main_workers_-_total_-_persons",
+                            color_continuous_scale=px.colors.sequential.Viridis,
+                            size_max=25,
+                            zoom=3,
+                            mapbox_style="carto-positron",
+                            title="District-wise Workforce Size")
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("**Insight:** Map showing which districts have larger workforce concentration.")
 
-def stacked_rural_urban(df):
-    """
-    Stacked bar: Rural vs Urban workforce by Industrial Sector
-    """
-    df_stack = df.groupby('industrial_sector')[['main_workers_-_rural_-_persons', 'main_workers_-_urban_-_persons']].sum().reset_index()
-    fig = px.bar(df_stack, x='industrial_sector', y=['main_workers_-_rural_-_persons', 'main_workers_-_urban_-_persons'],
-                 title="Rural vs Urban Workforce by Sector", barmode='stack', height=500)
-    return fig
+# ------------------------------
+# Pie Chart: Top 5 Districts by Workforce
+# ------------------------------
+def plot_pie_top_districts(df):
+    top_districts = df.groupby("district_name")["main_workers_-_total_-_persons"].sum().nlargest(5).reset_index()
+    fig = px.pie(top_districts, values="main_workers_-_total_-_persons",
+                 names="district_name",
+                 title="Top 5 Districts by Workforce")
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("**Insight:** Highlights districts with maximum workforce allocation.")
 
-# -------------------------------
-# Streamlit App
-# -------------------------------
-st.set_page_config(page_title="Industrial Workforce Insights", layout="wide")
-st.title("Resource Management: Industrial Workforce Dashboard")
+# ------------------------------
+# Streamlit Layout
+# ------------------------------
+st.set_page_config(page_title="Industrial Workforce Dashboard", layout="wide")
 
-# Load dataset
-file_path = "final_cleaned_industrial_data.csv"
-df = load_data(file_path)
+st.title("Industrial Workforce Insights - India")
+st.markdown("""
+Explore workforce distribution across states, districts, and industrial sectors.
+Focus on rural vs urban gaps and sector resource concentration.
+""")
 
-if df.empty:
-    st.stop()
+# Load data
+df = load_data(DATA_PATH)
 
-# Add engineered features
-df = add_features(df)
-
-# Show basic info
-st.subheader("Dataset Overview")
-st.write(f"Rows: {df.shape[0]}, Columns: {df.shape[1]}")
-st.dataframe(df.head(10))
-# Filters in sidebar
+# Sidebar filters
 st.sidebar.header("Filters")
-states = df['state_name'].unique()
-sectors = df['industrial_sector'].unique()
+states_selected = st.sidebar.multiselect("Select States", options=df["state_name"].unique())
+sectors_selected = st.sidebar.multiselect("Select Sectors", options=df["industrial_sector"].unique())
 
-selected_states = st.sidebar.multiselect("Select States", states, default=states)
-selected_sectors = st.sidebar.multiselect("Select Sectors", sectors, default=sectors)
-
-# Apply filters
-df_filtered = df[(df['state_name'].isin(selected_states)) & (df['industrial_sector'].isin(selected_sectors))]
+# Filtered Data
+filtered_df = filter_data(df, states_selected, sectors_selected)
 
 # Tabs for visualizations
-tab1, tab2, tab3, tab4 = st.tabs(["Bar Polar", "Sunburst", "Rural vs Urban", "Geospatial Map"])
+tabs = st.tabs(["Sector Polar", "Sunburst", "Rural vs Urban", "Geospatial Map", "Top Districts Pie"])
 
-with tab1:
-    st.plotly_chart(bar_polar_sector(df_filtered), use_container_width=True)
-
-with tab2:
-    st.plotly_chart(sunburst_state_district_sector(df_filtered), use_container_width=True)
-
-with tab3:
-    st.plotly_chart(stacked_rural_urban(df_filtered), use_container_width=True)
-
-with tab4:
-    geo_fig = geospatial_map(df_filtered)
-    if geo_fig:
-        st.plotly_chart(geo_fig, use_container_width=True)
-# Show key visualizations
-st.subheader("Sector-wise Workforce Distribution (Bar Polar)")
-st.plotly_chart(bar_polar_sector(df), use_container_width=True)
-
-st.subheader("State → District → Sector (Sunburst)")
-st.plotly_chart(sunburst_state_district_sector(df), use_container_width=True)
-
-st.subheader("Rural vs Urban Workforce (Stacked Bar)")
-st.plotly_chart(stacked_rural_urban(df), use_container_width=True)
-
-st.subheader("Geospatial Workforce Map")
-geo_fig = geospatial_map(df)
-if geo_fig:
-    st.plotly_chart(geo_fig, use_container_width=True)
-
-# Insights Section
-st.subheader("Quick Insights")
-top_sectors = df.groupby('industrial_sector')['total_workforce'].sum().sort_values(ascending=False).head(5)
-st.write("Top 5 sectors by workforce size:")
-st.dataframe(top_sectors)
-
-top_districts = df.groupby(['state_name', 'district_name'])['total_workforce'].sum().sort_values(ascending=False).head(10)
-st.write("Top 10 districts by workforce size:")
-st.dataframe(top_districts)
-
-st.write("Rural vs Urban workforce ratio (sample):")
-st.dataframe(df[['state_name', 'district_name', 'industrial_sector', 'rural_urban_ratio']].head(10))
+with tabs[0]:
+    plot_bar_polar(filtered_df)
+with tabs[1]:
+    plot_sunburst(filtered_df)
+with tabs[2]:
+    plot_stacked_rural_urban(filtered_df)
+with tabs[3]:
+    plot_geospatial(filtered_df)
+with tabs[4]:
+    plot_pie_top_districts(filtered_df)
